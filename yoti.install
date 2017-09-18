@@ -2,41 +2,28 @@
 
 /**
  * @file
- * Install, update and uninstall functions for the yoti module.
+ * Install, update, and uninstall functions for the Yoti module.
  */
 
-require_once __DIR__ . '/YotiHelper.php';
+use Drupal\Core\Site\Settings;
+use Drupal\yoti\Models\YotiUserModel;
 
 /**
  * Implements hook_requirements().
  */
 function yoti_requirements($phase) {
-  $requirements = array();
-  $t = get_t();
+  $requirements = [];
 
   if ($phase == 'install') {
-    if (!function_exists('curl_init')) {
-      $requirements['curl']['severity'] = REQUIREMENT_ERROR;
-      $requirements['curl']['description'] = $t('Yoti could not be installed. The cURL library is not installed. Please check the <a href="@url">PHP cURL documentation</a> for information on how to correct this.', array('@url' => 'http://www.php.net/manual/en/curl.setup.php'));
+    $privatePath = Settings::get('file_private_path');
+    if (!$privatePath) {
+      $requirements['yoti'] = [
+        'description' => t("Yoti requires that you have the file_private_path setting enabled for your website. Don't forget to clear the cache after you enable this setting."),
+        'severity' => REQUIREMENT_ERROR,
+      ];
     }
-
-    if (!function_exists('json_decode')) {
-      $requirements['json']['severity'] = REQUIREMENT_ERROR;
-      $requirements['json']['description'] = $t('Yoti could not be installed. The JSON library is not installed. Yoti PHP SDK needs the JSON PHP extension.');
-    }
-
-    if (version_compare(phpversion(), '5.4.0', '<')) {
-      $requirements['php_version']['title'] = $t('PHP version');
-      $requirements['php_version']['value'] = check_plain(phpversion());
-      $requirements['php_version']['severity'] = REQUIREMENT_ERROR;
-      $requirements['php_version']['description'] = $t('Yoti could not be installed. Yoti PHP SDK requires PHP 5.4 or higher.');
-    }
-
-    if (!is_writable(DRUPAL_ROOT . '/sites/all')) {
-      $requirements['php_version']['title'] = $t('Private folder');
-      $requirements['php_version']['value'] = DRUPAL_ROOT . '/sites/all';
-      $requirements['php_version']['severity'] = REQUIREMENT_ERROR;
-      $requirements['php_version']['description'] = $t('Yoti could not be installed. The following folder must be writable by the server: ' . DRUPAL_ROOT . '/sites/all');
+    else {
+      \Drupal::service('file_system')->mkdir($privatePath . '/yoti', 0777, TRUE);
     }
   }
 
@@ -47,42 +34,15 @@ function yoti_requirements($phase) {
  * Implements hook_install().
  */
 function yoti_install() {
-  $table_name = YotiHelper::YOTI_USER_TABLE_NAME;
-  db_query("CREATE TABLE IF NOT EXISTS `{$table_name}` (
-    `id` INT(10) UNSIGNED AUTO_INCREMENT,
-    `uid` int(10) UNSIGNED NOT NULL,
-    `identifier` VARCHAR(255) NOT NULL,
-    `selfie_filename` VARCHAR(255) NOT NULL,
-    `phone_number` VARCHAR(255) NULL,
-    `date_of_birth` VARCHAR(255) NULL,
-    `given_names` VARCHAR(255) NULL,
-    `family_name` VARCHAR(255) NULL,
-    `nationality` VARCHAR(255) NULL,
-    `gender` VARCHAR(255) NULL,
-    `email_address` VARCHAR(255) NULL,
-    `data` TEXT NULL,
-    PRIMARY KEY `id` (`id`),
-    UNIQUE KEY `uid` (`uid`)
-  )")->execute();
+  YotiUserModel::createYotiUserTable();
 }
 
 /**
  * Implements hook_uninstall().
  */
 function yoti_uninstall() {
-  $table_name = YotiHelper::YOTI_USER_TABLE_NAME;
-  $yotiConfigArr = array_keys(YotiHelper::getConfig());
-  foreach ($yotiConfigArr as $configKey) {
-    if (!empty($configKey)) {
-      variable_del($configKey);
-    }
-  }
-  db_query("DROP TABLE IF EXISTS `{$table_name}`")->execute();
-}
-
-/**
- * Implements hook_enable().
- */
-function yoti_enable() {
-  drupal_set_message(t('Yoti enabled. <a href="@path">Check module settings</a>.', array('@path' => url('admin/config/people/yoti'))));
+  // Delete Yoti config data.
+  \Drupal::configFactory()->getEditable('yoti.settings')->delete();
+  // Delete Yoti user table.
+  YotiUserModel::deleteYotiUserTable();
 }
