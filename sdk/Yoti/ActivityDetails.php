@@ -3,6 +3,8 @@ namespace Yoti;
 
 use attrpubapi_v1\Attribute;
 use attrpubapi_v1\AttributeList;
+use Yoti\Entity\Selfie;
+use Yoti\Helper\ActivityDetailsHelper;
 
 /**
  * Class ActivityDetails
@@ -14,6 +16,7 @@ class ActivityDetails
 {
     const ATTR_FAMILY_NAME = 'family_name';
     const ATTR_GIVEN_NAMES = 'given_names';
+    const ATTR_FULL_NAME = 'full_name';
     const ATTR_DATE_OF_BIRTH = 'date_of_birth';
     const ATTR_GENDER = 'gender';
     const ATTR_NATIONALITY = 'nationality';
@@ -33,6 +36,11 @@ class ActivityDetails
     private $_profile = [];
 
     /**
+     * @var ActivityDetailsHelper
+     */
+    public $helper;
+
+    /**
      * ActivityDetails constructor.
      * @param array $attributes
      * @param $rememberMeId
@@ -41,11 +49,13 @@ class ActivityDetails
     {
         $this->_rememberMeId = $rememberMeId;
 
-        // populate attributes
+        // Populate user profile attributes
         foreach ($attributes as $param => $value)
         {
             $this->setProfileAttribute($param, $value);
         }
+
+        $this->helper = new ActivityDetailsHelper($this);
     }
 
     /**
@@ -59,12 +69,19 @@ class ActivityDetails
     public static function constructFromAttributeList(AttributeList $attributeList, $rememberMeId)
     {
         $attrs = array();
-        /**
-         * @var Attribute $item
-         */
-        foreach ($attributeList->getAttributesList() as $item)
+
+        foreach ($attributeList->getAttributesList() as $item) /** @var Attribute $item */
         {
-            $attrs[$item->getName()] = $item->getValue()->getContents();
+            if($item->getName() === 'selfie')
+            {
+                $attrs[$item->getName()] = new Selfie(
+                    $item->getValue()->getContents(),
+                    $item->getContentType()->name()
+                );
+            }
+            else {
+                $attrs[$item->getName()] = $item->getValue()->getContents();
+            }
         }
 
         $inst = new self($attrs, $rememberMeId);
@@ -145,6 +162,16 @@ class ActivityDetails
     }
 
     /**
+     * Get full name.
+     *
+     * @return null|string
+     */
+    public function getFullName()
+    {
+        return $this->getProfileAttribute(self::ATTR_FULL_NAME);
+    }
+
+    /**
      * Get date of birth.
      *
      * @return null|string
@@ -191,7 +218,26 @@ class ActivityDetails
      */
     public function getSelfie()
     {
-        return $this->getProfileAttribute(self::ATTR_SELFIE);
+        $selfie = $this->getProfileAttribute(self::ATTR_SELFIE);
+
+        if($selfie instanceof Selfie)
+        {
+            $selfie = $selfie->getContent();
+        }
+
+        return $selfie;
+    }
+
+    /**
+     * Get selfie image object.
+     *
+     * @return null| \Yoti\Entity\Selfie $selfie
+     */
+    public function getSelfieEntity()
+    {
+        $selfieObj = $this->getProfileAttribute(self::ATTR_SELFIE);
+        // Returns selfie entity or null
+        return ($selfieObj instanceof Selfie) ? $selfieObj : NULL;
     }
 
     /**
@@ -212,5 +258,24 @@ class ActivityDetails
     public function getPostalAddress()
     {
         return $this->getProfileAttribute(self::ATTR_POSTAL_ADDRESS);
+    }
+
+    /**
+     * Returns a boolean representing the attribute value
+     * Or null if the attribute is not set in the dashboard
+     *
+     * @return bool|null
+     */
+    public function isAgeVerified()
+    {
+        return $this->helper->ageCondition->isVerified();
+    }
+
+    /**
+     * @return null|string
+     */
+    public function getVerifiedAge()
+    {
+        return $this->helper->ageCondition->getVerifiedAge();
     }
 }

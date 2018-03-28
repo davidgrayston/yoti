@@ -25,5 +25,13 @@ require_once __DIR__ . '/attrpubapi_v1/Attribute.php';
 require_once __DIR__ . '/attrpubapi_v1/AttributeList.php';
 require_once __DIR__ . '/attrpubapi_v1/ContentType.php';
 require_once __DIR__ . '/compubapi_v1/EncryptedData.php';
-require_once __DIR__ . '/Yoti/ActivityDetails.php';
-require_once __DIR__ . '/Yoti/YotiClient.php';
+
+// Autoload Yoti classes
+spl_autoload_register(function($className) {
+    $file = __DIR__ . '/' . str_replace('\\', DIRECTORY_SEPARATOR, $className).'.php';
+    if (file_exists($file)) {
+        require $file;
+        return true;
+    }
+    return false;
+});
