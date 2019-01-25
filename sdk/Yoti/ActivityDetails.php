@@ -1,10 +1,13 @@
 <?php
 namespace Yoti;
 
-use attrpubapi_v1\Attribute;
-use attrpubapi_v1\AttributeList;
-use Yoti\Entity\Selfie;
-use Yoti\Helper\ActivityDetailsHelper;
+use Yoti\Entity\Profile;
+use Yoti\Entity\Receipt;
+use Attrpubapi\AttributeList;
+use Yoti\Entity\ApplicationProfile;
+use Yoti\Util\Age\AgeVerificationConverter;
+use Yoti\Util\Profile\AttributeConverter;
+use Yoti\Util\Profile\AttributeListConverter;
 
 /**
  * Class ActivityDetails
@@ -14,268 +17,171 @@ use Yoti\Helper\ActivityDetailsHelper;
  */
 class ActivityDetails
 {
-    const ATTR_FAMILY_NAME = 'family_name';
-    const ATTR_GIVEN_NAMES = 'given_names';
-    const ATTR_FULL_NAME = 'full_name';
-    const ATTR_DATE_OF_BIRTH = 'date_of_birth';
-    const ATTR_GENDER = 'gender';
-    const ATTR_NATIONALITY = 'nationality';
-    const ATTR_PHONE_NUMBER = 'phone_number';
-    const ATTR_SELFIE = 'selfie';
-    const ATTR_EMAIL_ADDRESS = 'email_address';
-    const ATTR_POSTAL_ADDRESS = 'postal_address';
-
     /**
      * @var string receipt identifier
      */
-    private $_rememberMeId;
+    private $rememberMeId;
 
     /**
-     * @var array
+     * @var string parent receipt identifier
      */
-    private $_profile = [];
+    private $parentRememberMeId;
 
     /**
-     * @var ActivityDetailsHelper
+     * @var \Yoti\Entity\Profile
      */
-    public $helper;
+    private $userProfile;
+
+    /**
+     * @var \DateTime|null
+     */
+    private $timestamp;
+
+    /**
+     * @var ApplicationProfile
+     */
+    private $applicationProfile;
+
+    /**
+     * @var Receipt
+     */
+    private $receipt;
+
+    /**
+     * @var string
+     */
+    private $pem;
 
     /**
      * ActivityDetails constructor.
+     *
      * @param array $attributes
      * @param $rememberMeId
      */
-    public function __construct(array $attributes, $rememberMeId)
+    public function __construct(Receipt $receipt, $pem)
     {
-        $this->_rememberMeId = $rememberMeId;
+        $this->receipt = $receipt;
+        $this->pem = $pem;
 
-        // Populate user profile attributes
-        foreach ($attributes as $param => $value)
-        {
-            $this->setProfileAttribute($param, $value);
-        }
-
-        $this->helper = new ActivityDetailsHelper($this);
+        $this->setProfile();
+        $this->setTimestamp();
+        $this->setRememberMeId();
+        $this->setParentRememberMeId();
+        $this->setApplicationProfile();
     }
 
-    /**
-     * Construct model from attributelist.
-     *
-     * @param AttributeList $attributeList
-     * @param int $rememberMeId
-     *
-     * @return \Yoti\ActivityDetails
-     */
-    public static function constructFromAttributeList(AttributeList $attributeList, $rememberMeId)
+    private function setRememberMeId()
     {
-        $attrs = array();
-
-        foreach ($attributeList->getAttributesList() as $item) /** @var Attribute $item */
-        {
-            if($item->getName() === 'selfie')
-            {
-                $attrs[$item->getName()] = new Selfie(
-                    $item->getValue()->getContents(),
-                    $item->getContentType()->name()
-                );
-            }
-            else {
-                $attrs[$item->getName()] = $item->getValue()->getContents();
-            }
-        }
-
-        $inst = new self($attrs, $rememberMeId);
-
-        return $inst;
+        $this->rememberMeId = $this->receipt->getRememberMeId();
     }
 
-    /**
-     * Set a user profile attribute.
-     *
-     * @param $param
-     * @param $value
-     */
-    protected function setProfileAttribute($param, $value)
+    private function setParentRememberMeId()
     {
-        if (!empty($param)) {
-            $this->_profile[$param] = $value;
+        $this->parentRememberMeId = $this->receipt->getParentRememberMeId();
+    }
+
+    private function setTimestamp()
+    {
+        try {
+            $timestamp = $this->receipt->getTimestamp();
+            $this->timestamp = AttributeConverter::convertTimestampToDate($timestamp);
+        } catch(\Exception $e) {
+            $this->timestamp = NULL;
+            error_log("Warning: {$e->getMessage()}", 0);
         }
     }
 
-    /**
-     * Get user profile attribute.
-     *
-     * @param null|string $param
-     *
-     * @return array|mixed
-     */
-    public function getProfileAttribute($param = null)
+    private function setProfile()
     {
-        if ($param)
-        {
-            return $this->hasProfileAttribute($param) ? $this->_profile[$param] : null;
-        }
+        $protobufAttrList = $this->receipt->parseAttribute(
+            Receipt::ATTR_OTHER_PARTY_PROFILE_CONTENT,
+            $this->pem
+        );
+        $this->userProfile = new Profile($this->processUserProfileAttributes($protobufAttrList));
+    }
 
-        return $this->_profile;
+    private function setApplicationProfile()
+    {
+        $protobufAttributesList = $this->receipt->parseAttribute(
+            Receipt::ATTR_PROFILE_CONTENT,
+            $this->pem
+        );
+        $this->applicationProfile = new ApplicationProfile(
+            AttributeListConverter::convertToYotiAttributesMap($protobufAttributesList)
+        );
+    }
+
+    private function processUserProfileAttributes(AttributeList $protobufAttributesList)
+    {
+        $attributesMap = AttributeListConverter::convertToYotiAttributesMap($protobufAttributesList);
+        $this->appendAgeVerifications($attributesMap);
+
+        return $attributesMap;
     }
 
     /**
-     * Check if attribute exists.
+     * Add age_verifications data to the attributesMap
      *
-     * @param string $param
-     *
-     * @return bool
+     * @param array $attributesMap
      */
-    public function hasProfileAttribute($param)
+    private function appendAgeVerifications(array &$attributesMap)
     {
-        return array_key_exists($param, $this->_profile);
+        $ageVerificationConverter = new AgeVerificationConverter($attributesMap);
+        $ageVerifications = $ageVerificationConverter->getAgeVerificationsFromAttrsMap();
+        $attributesMap[Profile::ATTR_AGE_VERIFICATIONS] = $ageVerifications;
     }
 
     /**
-     * Get user id.
-     *
-     * @return string
+     * @return string|null
      */
-    public function getUserId()
+    public function getReceiptId()
     {
-        return $this->_rememberMeId;
+        return $this->receipt->getReceiptId();
     }
 
     /**
-     * Get family name.
+     * @return \DateTime|null
+     */
+    public function getTimestamp()
+    {
+        return $this->timestamp;
+    }
+
+    /**
+     * @return ApplicationProfile
+     */
+    public function getApplicationProfile()
+    {
+        return $this->applicationProfile;
+    }
+
+    /**
+     * Get user profile object.
+     *
+     * @return Profile
+     */
+    public function getProfile()
+    {
+        return $this->userProfile;
+    }
+
+    /**
+     * Get rememberMeId.
      *
      * @return null|string
      */
-    public function getFamilyName()
+    public function getRememberMeId()
     {
-        return $this->getProfileAttribute(self::ATTR_FAMILY_NAME);
+        return $this->rememberMeId;
     }
 
     /**
-     * Get given names.
+     * Get Parent Remember Me Id.
      *
      * @return null|string
      */
-    public function getGivenNames()
+    public function getParentRememberMeId()
     {
-        return $this->getProfileAttribute(self::ATTR_GIVEN_NAMES);
-    }
-
-    /**
-     * Get full name.
-     *
-     * @return null|string
-     */
-    public function getFullName()
-    {
-        return $this->getProfileAttribute(self::ATTR_FULL_NAME);
-    }
-
-    /**
-     * Get date of birth.
-     *
-     * @return null|string
-     */
-    public function getDateOfBirth()
-    {
-        return $this->getProfileAttribute(self::ATTR_DATE_OF_BIRTH);
-    }
-
-    /**
-     * Get gender.
-     *
-     * @return null|string
-     */
-    public function getGender()
-    {
-        return $this->getProfileAttribute(self::ATTR_GENDER);
-    }
-
-    /**
-     * Get user nationality.
-     *
-     * @return null|string
-     */
-    public function getNationality()
-    {
-        return $this->getProfileAttribute(self::ATTR_NATIONALITY);
-    }
-
-    /**
-     * Get user phone number.
-     *
-     * @return null|string
-     */
-    public function getPhoneNumber()
-    {
-        return $this->getProfileAttribute(self::ATTR_PHONE_NUMBER);
-    }
-
-    /**
-     * Get user selfie image data.
-     *
-     * @return null|string
-     */
-    public function getSelfie()
-    {
-        $selfie = $this->getProfileAttribute(self::ATTR_SELFIE);
-
-        if($selfie instanceof Selfie)
-        {
-            $selfie = $selfie->getContent();
-        }
-
-        return $selfie;
-    }
-
-    /**
-     * Get selfie image object.
-     *
-     * @return null| \Yoti\Entity\Selfie $selfie
-     */
-    public function getSelfieEntity()
-    {
-        $selfieObj = $this->getProfileAttribute(self::ATTR_SELFIE);
-        // Returns selfie entity or null
-        return ($selfieObj instanceof Selfie) ? $selfieObj : NULL;
-    }
-
-    /**
-     * Get user email address.
-     *
-     * @return null|string
-     */
-    public function getEmailAddress()
-    {
-        return $this->getProfileAttribute(self::ATTR_EMAIL_ADDRESS);
-    }
-
-    /**
-     * Get user address.
-     *
-     * @return null|string
-     */
-    public function getPostalAddress()
-    {
-        return $this->getProfileAttribute(self::ATTR_POSTAL_ADDRESS);
-    }
-
-    /**
-     * Returns a boolean representing the attribute value
-     * Or null if the attribute is not set in the dashboard
-     *
-     * @return bool|null
-     */
-    public function isAgeVerified()
-    {
-        return $this->helper->ageCondition->isVerified();
-    }
-
-    /**
-     * @return null|string
-     */
-    public function getVerifiedAge()
-    {
-        return $this->helper->ageCondition->getVerifiedAge();
+        return $this->parentRememberMeId;
     }
 }
