@@ -4,6 +4,7 @@ yoti.link:
     _controller: '\Drupal\yoti\Controller\YotiStartController::link'
   requirements:
     _permission: 'access content'
+    _custom_access: '\Drupal\yoti\Controller\YotiStartController::accessLink'
   options:
     no_cache: TRUE
 
@@ -13,17 +14,18 @@ yoti.register:
     _form: '\Drupal\yoti\Form\YotiUserLoginForm'
     _title: 'User Login'
   requirements:
-    _permission: 'access content'
+    _user_is_logged_in: 'FALSE'
   options:
     no_cache: TRUE
 
 yoti.unlink:
   path: '/yoti/unlink'
   defaults:
-    _controller: '\Drupal\yoti\Controller\YotiStartController::unlink'
-    _title: 'Unlink yoti'
+    _form: '\Drupal\yoti\Form\YotiUnlinkForm'
+    _title: 'Unlink Yoti'
   requirements:
-    _permission: 'access content'
+    _user_is_logged_in: 'TRUE'
+    _custom_access: '\Drupal\yoti\Form\YotiUnlinkForm::access'
   options:
     no_cache: TRUE
 
